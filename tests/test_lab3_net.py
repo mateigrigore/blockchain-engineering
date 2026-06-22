@@ -12,7 +12,7 @@ os.environ.setdefault("DIFFICULTY", "6")     # fast PoW for tests (must be set b
 import importlib.util
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MODULE_PATH = os.path.join(HERE, "..", "assignment_3 (1).py")
+MODULE_PATH = os.path.join(HERE, "..", "assignment3.py")
 _spec = importlib.util.spec_from_file_location("lab3_node", MODULE_PATH)
 m = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(m)

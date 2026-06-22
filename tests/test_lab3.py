@@ -7,7 +7,7 @@ import importlib.util
 import os
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MODULE_PATH = os.path.join(HERE, "..", "assignment_3 (1).py")
+MODULE_PATH = os.path.join(HERE, "..", "assignment3.py")
 
 
 def _load():

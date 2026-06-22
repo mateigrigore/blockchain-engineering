@@ -608,6 +608,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.chain = Chain()
         self.seen_txs = {} # tx_hash -> Transaction (everything we ever accepted)
         self.sync_buffer = {} # height -> Block (incoming full-chain stream)
+        self._awaiting = set() # heights we know we are missing and have re-requested
         self.mining_generation = 0 # bumped whenever the tip changes -> aborts in-flight mining
         self.teammates = []
 
@@ -806,17 +807,33 @@ class BlockchainCommunity(Community, PeerObserver):
         print(f"[recv] +chain block h={payload.height} {short(payload.block_hash)} from {short(peer.public_key.key_to_bin())}")
         block = self._block_from_payload(payload)
         self.sync_buffer[block.height] = block
-        self._try_adopt_synced_chain()
+        self._try_adopt_synced_chain(peer)
 
-    def _try_adopt_synced_chain(self) -> None:
+    def _buffer_links_to(self, block: Block, height: int) -> bool:
+        """True if the streamed block right above `height` chains onto `block`, so
+        `block` is genuinely part of the streamed chain rather than a conflicting
+        local fork. With no streamed successor there is nothing to contradict it."""
+        above = self.sync_buffer.get(height + 1)
+        return above is None or above.prev_hash == block.block_hash
+
+    def _try_adopt_synced_chain(self, peer: Peer | None = None) -> None:
         """Assemble the best contiguous chain from genesis, preferring streamed
         blocks (sync buffer) but falling back to blocks we already hold, and adopt
         it if it is valid and strictly better (longer/more work, or equal length with a
-        numerically smaller tip hash)."""
+        numerically smaller tip hash).
+
+        A local block is only reused when the stream's next block chains onto it,
+        so a streamed chain that forks below us never gets papered over by our own
+        (losing) fork. A hole that still has streamed blocks above it is recorded
+        and re-requested instead of stranding us on that fork."""
+        if not self.sync_buffer:
+            return
+        target_height = max(self.sync_buffer)
         # ===== BONUS 3: Ledger Store =====
         candidate = [self.chain.get_block(0)]         # our genesis (shared by all)
         h = 1
-        while True:
+        hole = None
+        while h <= target_height:
             nxt = None
             # ===== BONUS 5: Adaptive Difficulty =====
             # ancestors for height h come from the candidate prefix, not the
@@ -827,12 +844,23 @@ class BlockchainCommunity(Community, PeerObserver):
             if buffered is not None and self.chain.validate_block(buffered, candidate[-1], recent):
                 nxt = buffered
             # ===== BONUS 3: Ledger Store =====
-            elif h < self.chain.length() and self.chain.validate_block(self.chain.get_block(h), candidate[-1], recent):
+            elif (h < self.chain.length()
+                  and self.chain.validate_block(self.chain.get_block(h), candidate[-1], recent)
+                  and self._buffer_links_to(self.chain.get_block(h), h)):
                 nxt = self.chain.get_block(h)         # keep what we already have
             if nxt is None:
+                # We cannot reach height h. If the stream has blocks above this
+                # gap, we are missing the block that connects them.
+                if any(b > h for b in self.sync_buffer):
+                    hole = h
                 break
             candidate.append(nxt)
             h += 1
+
+        if hole is not None:
+            if hole not in self._awaiting and peer is not None:
+                self._request_full_chain(peer)
+            self._awaiting.add(hole)
 
         if len(candidate) <= 1:
             return
@@ -858,6 +886,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self._rebuild_mempool()
         for k in [k for k in self.sync_buffer if k <= candidate[-1].height]:
             del self.sync_buffer[k]
+        self._awaiting = {a for a in self._awaiting if a > candidate[-1].height}
         print(f"[sync] adopted chain len={len(candidate)} tip={short(candidate[-1].block_hash)}")
         self._broadcast(self._block_payload(NewBlock, candidate[-1]))
 

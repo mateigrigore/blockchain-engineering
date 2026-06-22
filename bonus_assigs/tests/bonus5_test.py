@@ -7,7 +7,14 @@ a closed-loop simulation that holds block time roughly steady through a tenfold
 hashrate swing, plus a check that a single lying timestamp barely moves anything.
 """
 
-from src.bonus_assigs.bonus5_adaptive_difficulty import (
+import os
+import sys
+
+# make the repo root importable so `bonus_assigs` resolves whether this file is
+# run as a script or collected by pytest from any working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from bonus_assigs.bonus5_adaptive_difficulty import (
     DEFAULT_PARAMS,
     RetargetParams,
     cumulative_work,
@@ -135,6 +142,11 @@ def run_all_checks() -> None:
     check_median_timestamp_rule()
     check_cumulative_work_beats_length()
     print("\nALL ADAPTIVE-DIFFICULTY CHECKS PASSED")
+
+
+def test_adaptive_difficulty():
+    """pytest entry point: run the full adaptive-difficulty check suite."""
+    run_all_checks()
 
 
 if __name__ == "__main__":

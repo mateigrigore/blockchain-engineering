@@ -23,7 +23,6 @@ import hashlib
 import os
 from time import time
 
-from cryptography.exceptions import UnsupportedAlgorithm
 from ipv8.community import Community, CommunitySettings
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.keyvault.crypto import default_eccrypto
@@ -484,6 +483,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.chain = Chain()
         self.seen_txs = {} # tx_hash -> Transaction (everything we ever accepted)
         self.sync_buffer = {} # height -> Block (incoming full-chain stream)
+        self._awaiting = set() # heights we know we are missing and have re-requested
         self.mining_generation = 0 # bumped whenever the tip changes -> aborts in-flight mining
         self.teammates = []
 
@@ -669,26 +669,54 @@ class BlockchainCommunity(Community, PeerObserver):
     def on_chain_block(self, peer: Peer, payload: ChainBlock) -> None:
         block = self._block_from_payload(payload)
         self.sync_buffer[block.height] = block
-        self._try_adopt_synced_chain()
+        self._try_adopt_synced_chain(peer)
 
-    def _try_adopt_synced_chain(self) -> None:
+    def _buffer_links_to(self, block: Block, height: int) -> bool:
+        """True if the streamed block right above `height` chains onto `block`, so
+        `block` is genuinely part of the streamed chain rather than a conflicting
+        local fork. With no streamed successor there is nothing to contradict it."""
+        above = self.sync_buffer.get(height + 1)
+        return above is None or above.prev_hash == block.block_hash
+
+    def _try_adopt_synced_chain(self, peer: Peer | None = None) -> None:
         """Assemble the best contiguous chain from genesis, preferring streamed
         blocks (sync buffer) but falling back to blocks we already hold, and adopt
         it if it is valid and strictly better (longer, or equal length with a
-        numerically smaller tip hash)."""
+        numerically smaller tip hash).
+
+        A local block is only reused when the stream's next block chains onto it,
+        so a streamed chain that forks below us never gets papered over by our own
+        (losing) fork. If we hit a hole that still has streamed blocks above it, we
+        record the missing height and re-request the chain instead of stranding
+        ourselves on that fork."""
+        if not self.sync_buffer:
+            return
+        target_height = max(self.sync_buffer)
         candidate = [self.chain.blocks[0]]            # our genesis (shared by all)
         h = 1
-        while True:
+        hole = None
+        while h <= target_height:
             nxt = None
             buffered = self.sync_buffer.get(h)
             if buffered is not None and self.chain.validate_block(buffered, candidate[-1]):
                 nxt = buffered
-            elif h < len(self.chain.blocks) and self.chain.validate_block(self.chain.blocks[h], candidate[-1]):
+            elif (h < len(self.chain.blocks)
+                  and self.chain.validate_block(self.chain.blocks[h], candidate[-1])
+                  and self._buffer_links_to(self.chain.blocks[h], h)):
                 nxt = self.chain.blocks[h]            # keep what we already have
             if nxt is None:
+                # We cannot reach height h. If the stream has blocks above this
+                # gap, we are missing the block that connects them.
+                if any(b > h for b in self.sync_buffer):
+                    hole = h
                 break
             candidate.append(nxt)
             h += 1
+
+        if hole is not None:
+            if hole not in self._awaiting and peer is not None:
+                self._request_full_chain(peer)
+            self._awaiting.add(hole)
 
         if len(candidate) <= 1:
             return
@@ -706,6 +734,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self._rebuild_mempool()
         for k in [k for k in self.sync_buffer if k <= candidate[-1].height]:
             del self.sync_buffer[k]
+        self._awaiting = {a for a in self._awaiting if a > candidate[-1].height}
         print(f"[sync] adopted chain len={len(candidate)} tip={short(candidate[-1].block_hash)}")
         self._broadcast(self._block_payload(NewBlock, candidate[-1]))
 
@@ -777,9 +806,6 @@ class BlockchainCommunity(Community, PeerObserver):
 async def start_client():
     if not os.path.exists(KEY_PATH):
         raise FileNotFoundError(KEY_PATH)
-
-    # compress unsupported curve errors from other nodes
-    install_unsupported_curve_filter()
 
     # set up IPv8
     builder = ConfigBuilder().clear_keys().clear_overlays()

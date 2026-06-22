@@ -8,9 +8,14 @@ write, compaction shrinking the disk, and body pruning that keeps headers.
 import os
 import shutil
 import struct
+import sys
 import tempfile
 
-from src.bonus_assigs.bonus3_ledger_store import LedgerStore, RECORD_MAGIC
+# make the repo root importable so `bonus_assigs` resolves whether this file is
+# run as a script or collected by pytest from any working directory.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+from bonus_assigs.bonus3_ledger_store import LedgerStore, RECORD_MAGIC
 
 
 def fake_header(height: int) -> bytes:
@@ -128,6 +133,11 @@ def run_all_checks() -> None:
         print("\nALL CHECKS PASSED")
     finally:
         shutil.rmtree(work_directory, ignore_errors=True)
+
+
+def test_ledger_store():
+    """pytest entry point: run the full ledger-store check suite."""
+    run_all_checks()
 
 
 if __name__ == "__main__":

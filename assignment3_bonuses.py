@@ -34,10 +34,10 @@ from ipv8.util import run_forever
 from ipv8_service import IPv8
 
 # ===== BONUS 3: Ledger Store =====
-from src.bonus_assigs.bonus3_ledger_store import LedgerStore
+from bonus_assigs.bonus3_ledger_store import LedgerStore
 
 # ===== BONUS 5: Adaptive Difficulty =====
-from src.bonus_assigs.bonus5_adaptive_difficulty import (
+from bonus_assigs.bonus5_adaptive_difficulty import (
     RetargetParams, next_difficulty, is_timestamp_acceptable,
     cumulative_work, median_timestamp,
 )
@@ -944,9 +944,6 @@ class BlockchainCommunity(Community, PeerObserver):
 async def start_client():
     if not os.path.exists(KEY_PATH):
         raise FileNotFoundError(KEY_PATH)
-
-    # compress unsupported curve errors from other nodes
-    install_unsupported_curve_filter()
 
     # set up IPv8
     builder = ConfigBuilder().clear_keys().clear_overlays()

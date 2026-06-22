@@ -63,7 +63,7 @@ MINE_START_DELAY = 3.0 # time to wait for peers to be discovered before mining
 
 # Directories for the base, the key, and the port number
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-KEY_PATH = os.environ.get("IPV8_KEY", os.path.join(BASE_DIR, "../keys", "my_peer_key.pem"))
+KEY_PATH = os.environ.get("IPV8_KEY", os.path.join(BASE_DIR, "..", "my_peer_key.pem"))
 PORT = int(os.environ.get("IPV8_PORT", "8090"))
 
 # ===== BONUS 3: Ledger Store =====
